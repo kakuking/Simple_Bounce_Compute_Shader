@@ -8,4 +8,5 @@ Using a compute shader, these are moved around and then are rendered using a sim
 
 To run: 
 > g++ Bounce.cpp -o Bounce -lglfw3 -lopengl32 -lglew32 -lglu32 -lgdi32 -static-libstdc++
+
 > .\Bounce.exe
