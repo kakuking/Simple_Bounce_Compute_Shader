@@ -3,15 +3,11 @@
 
 #include <iostream>
 #include <vector>
+#include <cstdlib>
+#include <ctime>
 
 #include <glm/glm.hpp>
 #include <glm/gtx/string_cast.hpp>
-
-// Size of the data array
-const int num_Vertices = 20;
-
-float deltaTime = 0.0f;
-float lastFrame = 0.0f;
 
 
 const char* vertexShaderSource = R"(
@@ -34,8 +30,8 @@ const char* geometryShaderSource = R"(
 
     void main() {
         float del = 0.5f;
-        float rad = 0.02;
-        float borderThickness = 0.01;
+        float rad = 0.01;
+        float borderThickness = 0.005;
         for (float theta = 0.0; theta <= 2.0 * 3.14159265359; theta += del) {
             // For the normal thang
             vec3 position;
@@ -97,6 +93,7 @@ const char* fragmentShaderSource = R"(
         vec3 borderColor = vec3(0.0, 0.0, 0.0);
 
         vec3 rgb =  mix(hsv2rgb(hsv), borderColor, 1-border);
+        // vec3 rgb =  mix(vec3(1.0, 0.0, 0.0), borderColor, 1-border);
         FragColor = vec4(rgb , 1.0);
     }
 )";
@@ -107,6 +104,7 @@ const char* computeShaderSource = R"(
     layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
     uniform float deltaTime;
+    uniform float numVerts;
 
     // Buffer to read and write data
     layout(std430, binding = 0) buffer InPosBuffer {
@@ -126,15 +124,17 @@ const char* computeShaderSource = R"(
     };
 
     float speed = 0.1f;
-    vec2 acc = vec2(0, -10);
+    // vec2 acc = vec2(0, -10);
+    vec2 acc = vec2(0, 0);
 
-    float dampY = 0.75f;
-    float stoppingY = 0.001;
-    float dampX = 0.75f;
-    float stoppingX = 0.05;
+    float dampY = 1.0f;
+    float dampX = 1.0f;
+    float dampCollision = 0.8;
+
+    float rad = 0.01;
+    float borderThickness = 0.005;
 
     void main() {
-        float rad = 0.02;
 
         uint globalIndex = gl_GlobalInvocationID.x;
 
@@ -146,24 +146,58 @@ const char* computeShaderSource = R"(
         float effectiveNegBorder = -1 + rad;
         if(pos.y < effectiveNegBorder){
             float newY = -1 * vel.y * dampY;
-            vel.y = abs(newY) > stoppingY ? newY : 0.0f;
+            vel.y = newY;
             pos.y = 2 * effectiveNegBorder - pos.y;
+        } else if(pos.y > -effectiveNegBorder){
+            float newY = -1 * vel.y * dampY;
+            vel.y = newY;
+            pos.y = -2 * effectiveNegBorder - pos.y;
         }
 
         if(pos.x < effectiveNegBorder){
             float newX = -1 * vel.x * dampX;
-            vel.x = abs(newX) > stoppingX ? newX : 0.0f;
+            vel.x = newX;
             pos.x = 2 * effectiveNegBorder - pos.x;
         } else if(pos.x > -effectiveNegBorder){
             float newX = -1 * vel.x * dampX;
-            vel.x = abs(newX) > stoppingX ? newX : 0.0f;
+            vel.x = newX;
             pos.x = -2*effectiveNegBorder - pos.x;
+        }
+
+        for(int i = 0; i < numVerts; i++){
+            if(i == globalIndex)
+                continue;
+            
+            float effRad = rad + borderThickness;
+            float dis = distance(pos, inPositions[i]);
+            float delDis = abs(2*effRad - dis)/2.0;
+            vec2 outNormal = normalize(inPositions[i] - pos);
+
+            if(dis < 2*effRad){
+                pos = pos - outNormal * delDis;
+                
+                // float u0 = dot(vel, outNormal);
+                // float u1 = dot(inVelocities[i], outNormal);
+                // float v1 = u1;
+                // vec2 otherComp = vel - u0 * outNormal;
+                // vel = otherComp + outNormal*v1*dampCollision;
+                
+
+                float num = dot(vel - inVelocities[i], pos - inPositions[i]);
+                num /= pow(distance(pos, inPositions[i]), 2);
+                vel = vel - num * (pos - inPositions[i]);
+            }
         }
 
         outPositions[globalIndex] = pos + vel * deltaTime;
         outVelocities[globalIndex] = vel;
     }
 )";
+
+const int num_Vertices = 1000;
+
+float deltaTime = 0.0f;
+float lastFrame = 0.0f;
 
 void setInputAndOutputBuffersForCompute(
         GLuint *inputPosBuffer, GLuint *outputPosBuffer,
@@ -324,6 +358,14 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);
 }
 
+void updateFPS(GLFWwindow* window){
+    float FPS = 1.0/deltaTime;
+    std::string windowTitle = "Bounce Bounce | FPS: " + std::to_string(FPS);
+    glfwSetWindowTitle(window, windowTitle.c_str());
+
+    std::cout << windowTitle << std::endl;
+}
+
 int main() {
     // Initialize GLFW
     if (!glfwInit()) {
@@ -375,12 +417,21 @@ int main() {
         return -1;
     }
 
+    std::srand(static_cast<unsigned int>(std::time(nullptr)));
+
     glm::vec2 *initialPositions = new glm::vec2[num_Vertices];
     glm::vec2 *velocities = new glm::vec2[num_Vertices];
-    float heightWidthFactor = 0.66f;
+    float heightWidthFactor = 0.9f;
+    float sqSide = 1.5f;
     for (int i = 0; i < num_Vertices; ++i) {
-        initialPositions[i] = glm::vec2((float)i*heightWidthFactor/(num_Vertices), (float)i*heightWidthFactor/(num_Vertices));
-        velocities[i] = glm::vec2(0.5f, 0.0f);
+        float randomX = -sqSide/2 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / sqSide));
+        float randomY = -sqSide/2 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / sqSide));
+
+        float randomX1 = -1 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 2.0));
+        float randomY1 = -1 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 2.0));        
+        // initialPositions[i] = glm::vec2((float)i*heightWidthFactor/(num_Vertices), (float)i*heightWidthFactor/(num_Vertices));
+        initialPositions[i] = glm::vec2(randomX, randomY);
+        velocities[i] = glm::vec2(randomX1/10, randomY1/10);
     }
 
 
@@ -413,6 +464,8 @@ int main() {
 
     glUseProgram(computeProgram);
     GLint timeComputeLoc = glGetUniformLocation(computeProgram, "deltaTime");
+    GLint numVertsComputeLoc = glGetUniformLocation(computeProgram, "numVerts");
+    glUniform1f(numVertsComputeLoc, num_Vertices);
     glUseProgram(0);
 
     glm::vec2 *outPositions, *outVelocities;
@@ -421,8 +474,9 @@ int main() {
     while(!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
-        // ------------------------------------------------- Running Compute Shader ----------------------------------------
         updateDeltaTime();
+        updateFPS(window);
+        // ------------------------------------------------- Running Compute Shader ----------------------------------------
         outputs = useAndDispatchComputeShader(&computeProgram, &outputPosBuffer, &outputVelBuffer, deltaTime, timeComputeLoc, 32);
         outPositions = outputs.first;
         outVelocities = outputs.second;
@@ -431,6 +485,7 @@ int main() {
         // std::cout << deltaTime << ": " << glm::to_string(outPositions[0]) << " " << glm::to_string(outVelocities[0]) << std::endl;
         // std::cout << "Velocity of 0: " << glm::to_string(outVelocities[0]) << std::endl;
 
+        glFinish();
         // ------------------------------------------------ Running Color  Shader ----------------------------------------
         glUseProgram(shaderProgram);
         glUniform1f(timeShaderLoc, static_cast<float>(glfwGetTime()));
@@ -441,6 +496,7 @@ int main() {
 
         glfwSwapBuffers(window);
         glfwPollEvents();
+
     }
 
     // Clean up
