@@ -8,7 +8,7 @@
 #include <glm/gtx/string_cast.hpp>
 
 // Size of the data array
-const int num_Vertices = 10;
+const int num_Vertices = 20;
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
@@ -25,8 +25,63 @@ const char* vertexShaderSource = R"(
     }
 )";
 
+const char* geometryShaderSource = R"(
+    #version 430 core
+    layout (points) in;
+    layout (triangle_strip, max_vertices = 168) out;
+
+    out float border;
+
+    void main() {
+        float del = 0.5f;
+        float rad = 0.02;
+        float borderThickness = 0.01;
+        for (float theta = 0.0; theta <= 2.0 * 3.14159265359; theta += del) {
+            // For the normal thang
+            vec3 position;
+            position.x = gl_in[0].gl_Position.x;
+            position.y = gl_in[0].gl_Position.y;
+            position.z = gl_in[0].gl_Position.z;
+            gl_Position = vec4(position, 1.0);
+            border = 1.0;
+            EmitVertex();
+
+            position.x = gl_in[0].gl_Position.x + rad * cos(theta);
+            position.y = gl_in[0].gl_Position.y + rad * sin(theta);
+            position.z = gl_in[0].gl_Position.z;
+            gl_Position = vec4(position, 1.0);
+            border = 1.0;
+            EmitVertex();
+
+            position.x = gl_in[0].gl_Position.x + rad * cos(theta + del);
+            position.y = gl_in[0].gl_Position.y + rad * sin(theta + del);
+            position.z = gl_in[0].gl_Position.z;
+            gl_Position = vec4(position, 1.0);
+            border = 1.0;
+            EmitVertex();
+
+            position.x = gl_in[0].gl_Position.x + (rad + borderThickness)  * cos(theta);
+            position.y = gl_in[0].gl_Position.y + (rad + borderThickness) * sin(theta);
+            position.z = gl_in[0].gl_Position.z;
+            gl_Position = vec4(position, 1.0);
+            border = 0.0;
+            EmitVertex();
+
+            position.x = gl_in[0].gl_Position.x + (rad + borderThickness)  * cos(theta + del);
+            position.y = gl_in[0].gl_Position.y + (rad + borderThickness) * sin(theta + del);
+            position.z = gl_in[0].gl_Position.z;
+            gl_Position = vec4(position, 1.0);
+            border = 0.0;
+            EmitVertex();
+
+            EndPrimitive();
+        }
+    }
+)";
+
 const char* fragmentShaderSource = R"(
     #version 430 core
+    in float border;
     out vec4 FragColor;
 
     uniform float time;
@@ -39,9 +94,10 @@ const char* fragmentShaderSource = R"(
 
     void main() {
         vec3 hsv = vec3(mod(time/10, 1.0), 1.0, 1.0);
+        vec3 borderColor = vec3(0.0, 0.0, 0.0);
 
-        vec3 rgb = hsv2rgb(hsv);
-        FragColor = vec4(rgb , 0.9);
+        vec3 rgb =  mix(hsv2rgb(hsv), borderColor, 1-border);
+        FragColor = vec4(rgb , 1.0);
     }
 )";
 
@@ -70,32 +126,38 @@ const char* computeShaderSource = R"(
     };
 
     float speed = 0.1f;
-    vec2 acc = vec2(0.0, -0.1);
+    vec2 acc = vec2(0, -10);
+
+    float dampY = 0.75f;
+    float stoppingY = 0.001;
+    float dampX = 0.75f;
+    float stoppingX = 0.05;
 
     void main() {
-        // Get the global index within the compute grid
+        float rad = 0.02;
+
         uint globalIndex = gl_GlobalInvocationID.x;
 
-        // Perform some computation, for example, doubling the input value
         vec2 pos = inPositions[globalIndex];
         vec2 vel = inVelocities[globalIndex];
 
         vel = vel + acc * deltaTime;
 
-        if(pos.y < -1){
-            vel.y = -1 * vel.y;
-            pos.y = -1;
-        } else if(pos.y > 1){
-            vel.y = -1 * vel.y;
-            pos.y = 1;
+        float effectiveNegBorder = -1 + rad;
+        if(pos.y < effectiveNegBorder){
+            float newY = -1 * vel.y * dampY;
+            vel.y = abs(newY) > stoppingY ? newY : 0.0f;
+            pos.y = 2 * effectiveNegBorder - pos.y;
         }
 
-        if(pos.x < -1){
-            vel.x = -1 * vel.x;
-            pos.x = -1;
-        } else if(pos.x > 1){
-            vel.x = -1 * vel.x;
-            pos.x = 1;
+        if(pos.x < effectiveNegBorder){
+            float newX = -1 * vel.x * dampX;
+            vel.x = abs(newX) > stoppingX ? newX : 0.0f;
+            pos.x = 2 * effectiveNegBorder - pos.x;
+        } else if(pos.x > -effectiveNegBorder){
+            float newX = -1 * vel.x * dampX;
+            vel.x = abs(newX) > stoppingX ? newX : 0.0f;
+            pos.x = -2*effectiveNegBorder - pos.x;
         }
 
         outPositions[globalIndex] = pos + vel * deltaTime;
@@ -187,7 +249,7 @@ int createAndCompileComputeShaderandComputeProgram(GLuint *computeShader, GLuint
     return 0;
 }
 
-int createAndCompileVertexFragmentShaderAndProgram(GLuint *vertexShader, GLuint *fragmentShader, GLuint *shaderProgram){
+int createAndCompileVertexFragmentShaderAndProgram(GLuint *vertexShader, GLuint *geomteryShader, GLuint *fragmentShader, GLuint *shaderProgram){
     *vertexShader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(*vertexShader, 1, &vertexShaderSource, nullptr);
     glCompileShader(*vertexShader);
@@ -197,7 +259,19 @@ int createAndCompileVertexFragmentShaderAndProgram(GLuint *vertexShader, GLuint 
     if (!success) {
         GLchar infoLog[512];
         glGetShaderInfoLog(*vertexShader, sizeof(infoLog), nullptr, infoLog);
-        std::cerr << "Compute shader compilation failed:\n" << infoLog << std::endl;
+        std::cerr << "Vertex shader compilation failed:\n" << infoLog << std::endl;
+        return -1;
+    }
+
+    *geomteryShader = glCreateShader(GL_GEOMETRY_SHADER);
+    glShaderSource(*geomteryShader, 1, &geometryShaderSource, nullptr);
+    glCompileShader(*geomteryShader);
+
+    glGetShaderiv(*geomteryShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        GLchar infoLog[512];
+        glGetShaderInfoLog(*geomteryShader, sizeof(infoLog), nullptr, infoLog);
+        std::cerr << "Geometry shader compilation failed:\n" << infoLog << std::endl;
         return -1;
     }
 
@@ -209,12 +283,13 @@ int createAndCompileVertexFragmentShaderAndProgram(GLuint *vertexShader, GLuint 
     if (!success) {
         GLchar infoLog[512];
         glGetShaderInfoLog(*fragmentShader, sizeof(infoLog), nullptr, infoLog);
-        std::cerr << "Compute shader compilation failed:\n" << infoLog << std::endl;
+        std::cerr << "Frag shader compilation failed:\n" << infoLog << std::endl;
         return -1;
     }
 
     *shaderProgram = glCreateProgram();
     glAttachShader(*shaderProgram, *vertexShader);
+    glAttachShader(*shaderProgram, *geomteryShader);
     glAttachShader(*shaderProgram, *fragmentShader);
     glLinkProgram(*shaderProgram);
 
@@ -222,7 +297,7 @@ int createAndCompileVertexFragmentShaderAndProgram(GLuint *vertexShader, GLuint 
     if (!success) {
         GLchar infoLog[512];
         glGetProgramInfoLog(*shaderProgram, sizeof(infoLog), nullptr, infoLog);
-        std::cerr << "Program linking failed:\n" << infoLog << std::endl;
+        std::cerr << "Shader Program linking failed:\n" << infoLog << std::endl;
         return -1;
     }
 
@@ -274,7 +349,10 @@ int main() {
 
     // Make the window's context current
     glfwMakeContextCurrent(window);
-    
+
+    // Set clear color
+    glClearColor(0.529f, 0.808f, 0.922f, 1.0f);
+
     // To make it RGB-A
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -289,7 +367,7 @@ int main() {
     }
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwMaximizeWindow(window);
+    // glfwMaximizeWindow(window);
 
     // Check if the required OpenGL version is supported
     if (!GLEW_VERSION_4_3) {
@@ -299,19 +377,20 @@ int main() {
 
     glm::vec2 *initialPositions = new glm::vec2[num_Vertices];
     glm::vec2 *velocities = new glm::vec2[num_Vertices];
+    float heightWidthFactor = 0.66f;
     for (int i = 0; i < num_Vertices; ++i) {
-        initialPositions[i] = glm::vec2((float)i/num_Vertices, (float)i/num_Vertices);
-        velocities[i] = glm::vec2(0.3f, 0.0f);
+        initialPositions[i] = glm::vec2((float)i*heightWidthFactor/(num_Vertices), (float)i*heightWidthFactor/(num_Vertices));
+        velocities[i] = glm::vec2(0.5f, 0.0f);
     }
 
 
     // ----------------------------------------------------- COLOR SHADER PART --------------------------------------------------
-    GLuint vertexShader, fragmentShader, shaderProgram;
+    GLuint vertexShader, geometryShader, fragmentShader, shaderProgram;
     GLuint VAO, VBO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     
-    createAndCompileVertexFragmentShaderAndProgram(&vertexShader, &fragmentShader, &shaderProgram);
+    createAndCompileVertexFragmentShaderAndProgram(&vertexShader, &geometryShader, &fragmentShader, &shaderProgram);
     setVAOandVBOforRender(&VAO, &VBO, initialPositions);
 
     glUseProgram(shaderProgram);
@@ -340,7 +419,7 @@ int main() {
     std::pair<glm::vec2*, glm::vec2*>  outputs;
 
     while(!glfwWindowShouldClose(window)) {
-        // glClear(GL_COLOR_BUFFER_BIT);
+        glClear(GL_COLOR_BUFFER_BIT);
 
         // ------------------------------------------------- Running Compute Shader ----------------------------------------
         updateDeltaTime();
@@ -350,6 +429,7 @@ int main() {
         setInputAndOutputBuffersForCompute(&inputPosBuffer, &outputPosBuffer, &inputVelBuffer, &outputVelBuffer, outPositions, outVelocities);       
 
         // std::cout << deltaTime << ": " << glm::to_string(outPositions[0]) << " " << glm::to_string(outVelocities[0]) << std::endl;
+        // std::cout << "Velocity of 0: " << glm::to_string(outVelocities[0]) << std::endl;
 
         // ------------------------------------------------ Running Color  Shader ----------------------------------------
         glUseProgram(shaderProgram);
