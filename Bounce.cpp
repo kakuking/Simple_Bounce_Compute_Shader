@@ -3,6 +3,8 @@
 
 #include <iostream>
 #include <vector>
+
+#include <cmath>
 #include <cstdlib>
 #include <ctime>
 
@@ -129,8 +131,7 @@ const char* computeShaderSource = R"(
 
     float dampY = 1.0f;
     float dampX = 1.0f;
-    float dampCollision = 0.5;
-    float gravityCoeff = 0.00001;
+    float gravityCoeff = 0.0001;
 
     float rad = 0.005;
     float borderThickness = 0.0025;
@@ -144,24 +145,20 @@ const char* computeShaderSource = R"(
 
 
         float effectiveNegBorder = -1 + rad;
-        if(pos.y < effectiveNegBorder){
-            float newY = -1 * vel.y * dampY;
-            vel.y = newY;
-            pos.y = 2 * effectiveNegBorder - pos.y;
-        } else if(pos.y > -effectiveNegBorder){
-            float newY = -1 * vel.y * dampY;
-            vel.y = newY;
-            pos.y = -2 * effectiveNegBorder - pos.y;
+        if(pos.y < effectiveNegBorder && vel.y < 0){
+            vel.y = -1 * vel.y * dampY;
+            // pos.y = 2 * effectiveNegBorder - pos.y;
+        } else if(pos.y > -effectiveNegBorder && vel.y > 0){
+            vel.y = -1 * vel.y * dampY;
+            // pos.y = -2 * effectiveNegBorder - pos.y;
         }
 
-        if(pos.x < effectiveNegBorder){
-            float newX = -1 * vel.x * dampX;
-            vel.x = newX;
-            pos.x = 2 * effectiveNegBorder - pos.x;
-        } else if(pos.x > -effectiveNegBorder){
-            float newX = -1 * vel.x * dampX;
-            vel.x = newX;
-            pos.x = -2*effectiveNegBorder - pos.x;
+        if(pos.x < effectiveNegBorder && vel.x < 0){
+            vel.x = -1 * vel.x * dampX;
+            // pos.x = 2 * effectiveNegBorder - pos.x;
+        } else if(pos.x > -effectiveNegBorder && vel.x > 0){
+            vel.x = -1 * vel.x * dampX;
+            // pos.x = -2*effectiveNegBorder - pos.x;
         }
 
         for(int i = 0; i < numVerts; i++){
@@ -177,13 +174,6 @@ const char* computeShaderSource = R"(
 
             if(dis < 2*effRad){
                 pos = pos - outNormal * delDis;
-                
-                // float u0 = dot(vel, outNormal);
-                // float u1 = dot(inVelocities[i], outNormal);
-                // float v1 = u1;
-                // vec2 otherComp = vel - u0 * outNormal;
-                // vel = otherComp + outNormal*v1*dampCollision;
-                
 
                 float num = dot(vel - inVelocities[i], pos - inPositions[i]);
                 num /= pow(distance(pos, inPositions[i]), 2);
@@ -198,7 +188,7 @@ const char* computeShaderSource = R"(
     }
 )";
 
-const int num_Vertices = 1000;
+const int num_Vertices = 9;
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
@@ -434,12 +424,27 @@ int main() {
         float randomY = -sqSide/2 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / sqSide));
 
         float randomX1 = -1 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 2.0));
-        float randomY1 = -1 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 2.0));        
+        float randomY1 = -1 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 2.0));   
+
         // initialPositions[i] = glm::vec2((float)i*heightWidthFactor/(num_Vertices), (float)i*heightWidthFactor/(num_Vertices));
-        initialPositions[i] = glm::vec2(randomX, randomY);
-        velocities[i] = glm::vec2(randomX1/50, randomY1/50);
-        // velocities[i] = glm::vec2(0.0f,  0.0f);
+        // initialPositions[i] = glm::vec2(randomX, randomY);
+        // velocities[i] = glm::vec2(randomX1/10, randomY1/10);
+        velocities[i] = glm::vec2(0.0f,  0.0f);
     }
+
+    float num_on_side = sqrt(num_Vertices);
+    float spacing = sqSide/num_on_side;
+
+    for(int i = 0; i < num_on_side; i++){
+        for(int j = 0; j < num_on_side; j++){
+                float x = -sqSide/2 + i * spacing;
+                float y = -sqSide/2 + j * spacing;
+                initialPositions[(int)num_on_side * i + j] = glm::vec2(x, y);
+        }
+    }
+
+    // for(int i = 0; i < num_Vertices; i++)
+    //     std::cout << glm::to_string(initialPositions[i]) << std::endl;
 
 
     // ----------------------------------------------------- COLOR SHADER PART --------------------------------------------------
