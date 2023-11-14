@@ -30,8 +30,8 @@ const char* geometryShaderSource = R"(
 
     void main() {
         float del = 0.5f;
-        float rad = 0.01;
-        float borderThickness = 0.005;
+        float rad = 0.005;
+        float borderThickness = 0.0025;
         for (float theta = 0.0; theta <= 2.0 * 3.14159265359; theta += del) {
             // For the normal thang
             vec3 position;
@@ -129,10 +129,11 @@ const char* computeShaderSource = R"(
 
     float dampY = 1.0f;
     float dampX = 1.0f;
-    float dampCollision = 0.8;
+    float dampCollision = 0.5;
+    float gravityCoeff = 0.00001;
 
-    float rad = 0.01;
-    float borderThickness = 0.005;
+    float rad = 0.005;
+    float borderThickness = 0.0025;
 
     void main() {
 
@@ -141,7 +142,6 @@ const char* computeShaderSource = R"(
         vec2 pos = inPositions[globalIndex];
         vec2 vel = inVelocities[globalIndex];
 
-        vel = vel + acc * deltaTime;
 
         float effectiveNegBorder = -1 + rad;
         if(pos.y < effectiveNegBorder){
@@ -173,6 +173,8 @@ const char* computeShaderSource = R"(
             float delDis = abs(2*effRad - dis)/2.0;
             vec2 outNormal = normalize(inPositions[i] - pos);
 
+            acc += outNormal * gravityCoeff / pow(dis, 2);
+
             if(dis < 2*effRad){
                 pos = pos - outNormal * delDis;
                 
@@ -188,6 +190,8 @@ const char* computeShaderSource = R"(
                 vel = vel - num * (pos - inPositions[i]);
             }
         }
+
+        vel = vel + acc * deltaTime;
 
         outPositions[globalIndex] = pos + vel * deltaTime;
         outVelocities[globalIndex] = vel;
@@ -358,12 +362,14 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
     glViewport(0, 0, width, height);
 }
 
-void updateFPS(GLFWwindow* window){
+float updateFPS(GLFWwindow* window){
     float FPS = 1.0/deltaTime;
     std::string windowTitle = "Bounce Bounce | FPS: " + std::to_string(FPS);
     glfwSetWindowTitle(window, windowTitle.c_str());
 
-    std::cout << windowTitle << std::endl;
+    // std::cout << windowTitle << std::endl;
+
+    return FPS;
 }
 
 int main() {
@@ -431,7 +437,8 @@ int main() {
         float randomY1 = -1 + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / 2.0));        
         // initialPositions[i] = glm::vec2((float)i*heightWidthFactor/(num_Vertices), (float)i*heightWidthFactor/(num_Vertices));
         initialPositions[i] = glm::vec2(randomX, randomY);
-        velocities[i] = glm::vec2(randomX1/10, randomY1/10);
+        velocities[i] = glm::vec2(randomX1/50, randomY1/50);
+        // velocities[i] = glm::vec2(0.0f,  0.0f);
     }
 
 
@@ -471,11 +478,16 @@ int main() {
     glm::vec2 *outPositions, *outVelocities;
     std::pair<glm::vec2*, glm::vec2*>  outputs;
 
+    float sumFPS = 0;
+    float numFrames = 0;
+
     while(!glfwWindowShouldClose(window)) {
         glClear(GL_COLOR_BUFFER_BIT);
 
         updateDeltaTime();
-        updateFPS(window);
+
+        sumFPS += updateFPS(window);
+        numFrames++;
         // ------------------------------------------------- Running Compute Shader ----------------------------------------
         outputs = useAndDispatchComputeShader(&computeProgram, &outputPosBuffer, &outputVelBuffer, deltaTime, timeComputeLoc, 32);
         outPositions = outputs.first;
@@ -498,6 +510,9 @@ int main() {
         glfwPollEvents();
 
     }
+
+    float avgFPS = sumFPS/numFrames;
+    std::cout << "Average FPS: " << avgFPS << std::endl;
 
     // Clean up
     delete[] outPositions;
