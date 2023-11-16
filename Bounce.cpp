@@ -9,6 +9,7 @@
 #include <ctime>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/string_cast.hpp>
 
 
@@ -17,9 +18,11 @@ const char* vertexShaderSource = R"(
     layout (location = 0) in vec2 aPos;
 
     uniform float time;
+    uniform mat4 proj_mat;
 
     void main() {
-        gl_Position = vec4(aPos.xy, 0.0, 1.0);
+        vec4 pos = proj_mat * vec4(aPos.xy, 0.0, 1.0);
+        gl_Position = pos;
     }
 )";
 
@@ -125,7 +128,7 @@ const char* computeShaderSource = R"(
         vec2 outVelocities[];
     };
 
-    float speed = 0.1f;
+    float maxSpeed = 2.0f;
     // vec2 acc = vec2(0, -10);
     vec2 acc = vec2(0, 0);
 
@@ -146,19 +149,19 @@ const char* computeShaderSource = R"(
 
         float effectiveNegBorder = -1 + rad;
         if(pos.y < effectiveNegBorder && vel.y < 0){
-            vel.y = -1 * vel.y * dampY;
-            // pos.y = 2 * effectiveNegBorder - pos.y;
+            pos.y = 2*effectiveNegBorder - pos.y;
+            vel.y = -vel.y * dampY;
         } else if(pos.y > -effectiveNegBorder && vel.y > 0){
-            vel.y = -1 * vel.y * dampY;
-            // pos.y = -2 * effectiveNegBorder - pos.y;
+            pos.y = -2*effectiveNegBorder - pos.y;
+            vel.y = -vel.y * dampY;
         }
 
         if(pos.x < effectiveNegBorder && vel.x < 0){
-            vel.x = -1 * vel.x * dampX;
-            // pos.x = 2 * effectiveNegBorder - pos.x;
+            pos.x = 2*effectiveNegBorder - pos.x;
+            vel.x = -vel.x * dampX;
         } else if(pos.x > -effectiveNegBorder && vel.x > 0){
-            vel.x = -1 * vel.x * dampX;
-            // pos.x = -2*effectiveNegBorder - pos.x;
+            pos.x = -2*effectiveNegBorder - pos.x;
+            vel.x = -vel.x * dampX;
         }
 
         for(int i = 0; i < numVerts; i++){
@@ -170,25 +173,31 @@ const char* computeShaderSource = R"(
             float delDis = abs(2*effRad - dis)/2.0;
             vec2 outNormal = normalize(inPositions[i] - pos);
 
-            acc += outNormal * gravityCoeff / pow(dis, 2);
-
+            float divisor = pow(max(dis, effRad * 2), 2);
+            // acc += outNormal * (divisor > 0.0 ? gravityCoeff / divisor : 0.0);
+            if(dis > 2*effRad)
+                acc += outNormal * gravityCoeff / pow(dis, 2);
+            
             if(dis < 2*effRad){
                 pos = pos - outNormal * delDis;
 
-                float num = dot(vel - inVelocities[i], pos - inPositions[i]);
-                num /= pow(distance(pos, inPositions[i]), 2);
+                float num = dot(vel - inVelocities[i], -outNormal);
+                // num /= pow(distance(pos, inPositions[i]), 2);
+                num /= pow(2*effRad, 1);
                 vel = vel - num * (pos - inPositions[i]);
             }
         }
 
         vel = vel + acc * deltaTime;
+        // float speed = length(vel);
+        // vel = speed <= maxSpeed ? vel : vel * maxSpeed/speed; 
 
         outPositions[globalIndex] = pos + vel * deltaTime;
         outVelocities[globalIndex] = vel;
     }
 )";
 
-const int num_Vertices = 9;
+const int num_Vertices = 1000;
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
@@ -428,8 +437,8 @@ int main() {
 
         // initialPositions[i] = glm::vec2((float)i*heightWidthFactor/(num_Vertices), (float)i*heightWidthFactor/(num_Vertices));
         // initialPositions[i] = glm::vec2(randomX, randomY);
-        // velocities[i] = glm::vec2(randomX1/10, randomY1/10);
-        velocities[i] = glm::vec2(0.0f,  0.0f);
+        velocities[i] = glm::vec2(randomX1/10, randomY1/10);
+        // velocities[i] = glm::vec2(0.0f,  0.0f);
     }
 
     float num_on_side = sqrt(num_Vertices);
@@ -456,8 +465,13 @@ int main() {
     createAndCompileVertexFragmentShaderAndProgram(&vertexShader, &geometryShader, &fragmentShader, &shaderProgram);
     setVAOandVBOforRender(&VAO, &VBO, initialPositions);
 
+    float projSize = 1.0f;
+    glm::mat4 projMat = glm::ortho(-projSize, projSize, -projSize, projSize);
+
     glUseProgram(shaderProgram);
     GLint timeShaderLoc = glGetUniformLocation(shaderProgram, "time");
+    GLint projMatShaderLoc = glGetUniformLocation(shaderProgram, "proj_mat");
+    glUniformMatrix4fv(projMatShaderLoc, 1, GL_FALSE, glm::value_ptr(projMat));
     glUseProgram(0);
 
 
@@ -531,7 +545,7 @@ int main() {
     glDeleteBuffers(1, &inputPosBuffer);
     glDeleteBuffers(1, &outputPosBuffer);
     glDeleteBuffers(1, &inputVelBuffer);
-    glDeleteBuffers(1, &inputPosBuffer);
+    glDeleteBuffers(1, &outputVelBuffer);
 
     // Terminate GLFW
     glfwTerminate();
