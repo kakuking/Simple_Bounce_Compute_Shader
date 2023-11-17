@@ -35,8 +35,8 @@ const char* geometryShaderSource = R"(
 
     void main() {
         float del = 0.5f;
-        float rad = 0.005;
-        float borderThickness = 0.0025;
+        float rad = 0.05;
+        float borderThickness = 0.025;
         for (float theta = 0.0; theta <= 2.0 * 3.14159265359; theta += del) {
             // For the normal thang
             vec3 position;
@@ -136,8 +136,8 @@ const char* computeShaderSource = R"(
     float dampX = 1.0f;
     float gravityCoeff = 0.0001;
 
-    float rad = 0.005;
-    float borderThickness = 0.0025;
+    float rad = 0.05;
+    float borderThickness = 0.025;
 
     void main() {
 
@@ -197,7 +197,7 @@ const char* computeShaderSource = R"(
     }
 )";
 
-const int num_Vertices = 1000;
+const int num_Vertices = 16;
 
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
@@ -437,8 +437,8 @@ int main() {
 
         // initialPositions[i] = glm::vec2((float)i*heightWidthFactor/(num_Vertices), (float)i*heightWidthFactor/(num_Vertices));
         // initialPositions[i] = glm::vec2(randomX, randomY);
-        velocities[i] = glm::vec2(randomX1/10, randomY1/10);
-        // velocities[i] = glm::vec2(0.0f,  0.0f);
+        // velocities[i] = glm::vec2(randomX1/1, randomY1/1);
+        velocities[i] = glm::vec2(0.0f,  0.0f);
     }
 
     float num_on_side = sqrt(num_Vertices);
